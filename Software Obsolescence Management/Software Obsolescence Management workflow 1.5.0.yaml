@@ -65,8 +65,8 @@ workflow:
         y: 1
       description: Run custom JavaScript code.
       predecessors: []
-    get_os_eol_data:
-      name: get_os_eol_data
+    alert_os_eos:
+      name: alert_os_eos
       input:
         script: "import { eventsClient } from\n'@dynatrace-sdk/client-classic-environment-v2';\n\
           \nimport { queryExecutionClient } from \"@dynatrace-sdk/client-query\";\n\
@@ -192,7 +192,32 @@ workflow:
           \ } catch (error) {\n      console.error(\"Error while pulling detected\
           \ operating systems:\", error);\n      throw error;\n    }    \n  } else\
           \ {\n    console.log(`All alert thresholds are deactivated. The alerting\
-          \ worker will not run.`)\n  }\n}\n\n\n//---------------------------------\
+          \ worker will not run.`)\n  }\n}\n\n\n\nexport default async function ({\
+          \ execution_id }) {\n  const configGet = await fetch(`/platform/automation/v1/executions/${execution_id}/tasks/config/result`);\n\
+          \  const configBody = await configGet.json();\n  const alertThresholds =\
+          \ configBody['alertThresholds'];\n  const alertManagementZoneRestrictions\
+          \ = configBody['alertManagementZoneRestrictions'];\n  const alertTagRestrictions\
+          \ = configBody['alertTagRestrictions'];\n  const supportOverrides = configBody['supportOverrides'];\n\
+          \  \n  raiseProactiveAlerts(alertThresholds, supportOverrides, alertManagementZoneRestrictions,\
+          \ alertTagRestrictions);\n}"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          get_os_eol_data: OK
+      description: Run custom JavaScript code.
+      predecessors:
+      - get_os_eol_data
+    get_os_eol_data:
+      name: get_os_eol_data
+      input:
+        script: "import { eventsClient } from\n'@dynatrace-sdk/client-classic-environment-v2';\n\
+          \nimport { queryExecutionClient } from \"@dynatrace-sdk/client-query\";\n\
+          \    \n//--------------------------------- ↓ Only modify the code section\
+          \ below if you fully understand how the workflow's code and dashboard's\
+          \ DQL are working together ↓ ---------------------------------\n\n\n//---------------------------------\
           \ ↓ Utilities for refreshing OS data ↓ ---------------------------------\n\
           \nlet eolTechnologies;\n\nconst osToProductSlugMap = {\n  'Red Hat Enterprise\
           \ Linux Server': 'rhel',\n  'Red Hat Enterprise Linux Server release': 'rhel'\n\
@@ -319,9 +344,7 @@ workflow:
           \ configBody['alertThresholds'];\n  const alertManagementZoneRestrictions\
           \ = configBody['alertManagementZoneRestrictions'];\n  const alertTagRestrictions\
           \ = configBody['alertTagRestrictions'];\n  const supportOverrides = configBody['supportOverrides'];\n\
-          \  \n  refreshOsData();\n  console.log(`Refreshing OS Data...`);\n  raiseProactiveAlerts(alertThresholds,\
-          \ supportOverrides, alertManagementZoneRestrictions, alertTagRestrictions);\n\
-          }"
+          \  \n  refreshOsData();\n  console.log(`Refreshing OS Data...`);\n}"
       action: dynatrace.automations:run-javascript
       position:
         x: 0
@@ -344,131 +367,11 @@ workflow:
           \  'DOTNET': 'NUGET',\n  'NODE_JS': 'NPM',\n  'JAVA': 'MAVEN',\n  'GO':\
           \ 'GO'\n}\n\n//--------------------------------- ↓ Only modify the code\
           \ section below if you fully understand how the workflow's code and dashboard's\
-          \ DQL are working together ↓ ---------------------------------\n\n//---------------------------------\
-          \ ↓ Raise proactive alerts ↓ ---------------------------------\n\nasync\
-          \ function raiseProactiveAlerts(alertThresholds, supportOverrides, alertManagementZoneRestrictions,\
-          \ alertTagRestrictions) {\n  if(Object.keys(alertThresholds).find(e => alertThresholds[e]\
-          \ !== false && alertThresholds[e] !== 'false')) { // Launch the worker only\
-          \ if there's at least one threshold activated (cf. constants above)\n  \
-          \  console.log('Launching the obsolescence alerting worker...')\n    const\
-          \ overridesVariableArray = [];\n    for(let override of Object.keys(supportOverrides))\
-          \ {\n      const overridesVariable = {};\n      overridesVariable[override]\
-          \ = supportOverrides[override];\n      overridesVariableArray.push(JSON.stringify(overridesVariable).replace(/\"\
-          /g, \"'\"));\n    }\n    console.log('Support overrides:')\n    console.log(overridesVariableArray.map(e\
-          \ => `\"${e}\"`).join(','));\n    try {\n      const query = {\n       \
-          \ body: {\n          query: 'fetch dt.entity.host, from: -15m | fieldsAdd\
-          \ osVersion, managementZones, hostGroupName, tags, softwareObsolescenceManagement\
-          \ = entity.name | filter isNotNull(osVersion) | fieldsAdd result = lookup([\
-          \ fetch events, from: -7d | filter dt.system.bucket == \"default_davis_custom_events\"\
-          \ | filter event.name == \"software-obsolescence-management.os-info\" |\
-          \ sort timestamp DESC ], sourceField:osVersion, lookupField:key ) | fieldsFlatten\
-          \ result, prefix:\"event.\" | fieldsAdd `Extended Support` = if( ((indexOf(toString(array('\
-          \ +\n            overridesVariableArray.map(e => `\"${e}\"`).join(',') +\n\
-          \            ')), osVersion, from: 0) >= 0) AND (indexOf(toString(array('\
-          \ +\n            overridesVariableArray.map(e => `\"${e}\"`).join(',') +\n\
-          \            ')), \"}\", from: indexOf(toString(array(' +\n            overridesVariableArray.map(e\
-          \ => `\"${e}\"`).join(',') +\n            ')), osVersion, from: 0)) >= 0)),\
-          \ substring( toString(array(' +\n            overridesVariableArray.map(e\
-          \ => `\"${e}\"`).join(',') +\n            ')), from: ( (indexOf(toString(array('\
-          \ +\n            overridesVariableArray.map(e => `\"${e}\"`).join(',') +\n\
-          \            ')), osVersion, from: 0) + stringLength(osVersion) + 5) ),\
-          \ to: indexOf(toString(array(' +\n            overridesVariableArray.map(e\
-          \ => `\"${e}\"`).join(',') +\n            ')), \"}\", from: indexOf(toString(array('\
-          \ +\n            overridesVariableArray.map(e => `\"${e}\"`).join(',') +\n\
-          \            ')), osVersion, from: 0)) - 2 ), else: null ) | fieldsAdd timeBeforeObsolescence\
-          \ = toTimestamp(if(isNotNull(`Extended Support`), `Extended Support`, else:\
-          \ event.eol)) - now() | fields Host = entity.name, `Management Zones` =\
-          \ managementZones, `Tags` = tags, OS = event.os, `Running Version` = event.currentVersion,\
-          \ `Full Name` = osVersion, LTS = event.lts, Cycle = event.currentCycle,\
-          \ `Cycle Published At` = substring(event.currentCyclePublishedAt, to:10),\
-          \ `End of Life` = event.eol, `Extended Support`, `Time Before Obsolescence`\
-          \ = timeBeforeObsolescence, `Latest Version` = event.latestVersion, `Latest\
-          \ Version Published at` = substring(event.latestVersionPublishedAt, to:10),\
-          \ Link = event.link, id, key = event.key | filter `Time Before Obsolescence`\
-          \ > toDuration(-7 * 24 * 60 * 60 * 1000000000) AND `Time Before Obsolescence`\
-          \ < toDuration(90 * 24 * 60 * 60 * 1000000000) | fieldsAdd lastAlert = lookup([\
-          \ fetch events, from: -30d | filter dt.system.bucket == \"default_davis_custom_events\"\
-          \ | filter source == \"software-obsolescence-management.os-alert\" | sort\
-          \ timestamp DESC ], sourceField:id, lookupField:dt.source_entity) | limit\
-          \ 20000'\n          }\n        };\n      // console.log('DQL query:')\n\
-          \      // console.log(query);\n      let res = await queryExecutionClient.queryExecute(query);\n\
-          \      // console.log(res);\n      res = await queryExecutionClient.queryPoll({\n\
-          \        requestToken: res.requestToken,\n        requestTimeoutMilliseconds:\
-          \ 30000\n      });\n      if(res.result && res.result.records) {\n     \
-          \   console.log(\"Soon-to-be-obsolete Operating Systems pulled successfully.\"\
-          );\n        const soonObsoleteEntities = {'0': [], '30': []};\n        for(let\
-          \ entity of res.result.records) {\n          if(entity[\"Time Before Obsolescence\"\
-          ] < 0) {\n            if(alertThresholds['0']) soonObsoleteEntities['0'].push(entity);\n\
-          \          } else if(entity[\"Time Before Obsolescence\"] < 30 * 24 * 60\
-          \ * 60 * 1000000000) {\n            if(alertThresholds['30']) soonObsoleteEntities['30'].push(entity);\n\
-          \          }\n        }\n        console.log(\"Sorted soon-to-be-obsolete\
-          \ Operating Systems:\");\n        console.log(soonObsoleteEntities);\n \
-          \       // From the full list of entities that will soon be obsolete, filter\
-          \ the ones that pass the management zone and tag restrictions and build\
-          \ the corresponding events\n        const filteredEvents = [];\n       \
-          \ for(let threshold of Object.keys(soonObsoleteEntities)) {\n          if(['CUSTOM_INFO',\
-          \ 'CUSTOM_ALERT'].includes(alertThresholds[threshold])) {\n            for(let\
-          \ entity of soonObsoleteEntities[threshold]) {\n              let matchedManagementZones\
-          \ = 0;\n              for(let managementZone of entity['Management Zones'])\
-          \ if(alertManagementZoneRestrictions.includes(managementZone)) matchedManagementZones++;\n\
-          \              let matchedTags = 0;\n              for(let tag of entity['Tags'])\
-          \ if(alertTagRestrictions.includes(tag)) matchedTags++;\n              if(\n\
-          \                (alertManagementZoneRestrictions.length === 0 || matchedManagementZones\
-          \ > 0) &&\n                (alertTagRestrictions.length === 0 || matchedTags\
-          \ > 0) &&\n                ((!entity['lastAlert'] || !entity['lastAlert']['Max\
-          \ Remaining Days Before Obsolescence'] || entity['lastAlert']['key'] !==\
-          \ entity['key']) || parseInt(threshold) < parseInt(entity['lastAlert']['Max\
-          \ Remaining Days Before Obsolescence']))\n              ) {\n          \
-          \      // Clean up output before saving the event\n                delete\
-          \ entity['Management Zones'];\n                delete entity['Tags'];\n\
-          \                const id = entity['id'];\n                delete entity['id'];\n\
-          \                const host = entity['Host'];\n                delete entity['Host'];\n\
-          \                entity['Full OS Name'] = entity['Full Name'];\n       \
-          \         delete entity['Full Name'];\n                delete entity['Time\
-          \ Before Obsolescence'];\n                delete entity['lastAlert'];\n\
-          \                entity['Max Remaining Days Before Obsolescence'] = parseInt(threshold);\n\
-          \                // Remove null values in case of support override\n   \
-          \             if(entity['OS'] === null) delete entity['OS'];\n         \
-          \       if(entity['LTS'] === null) delete entity['LTS'];\n             \
-          \   if(entity['Cycle'] === null) delete entity['Cycle'];\n             \
-          \   if(entity['Latest Version Published at'] === null) delete entity['Latest\
-          \ Version Published at'];\n                if(entity['Cycle Published At']\
-          \ === null) delete entity['Cycle Published At'];\n                if(entity['Running\
-          \ Version'] === null) delete entity['Running Version'];\n              \
-          \  if(entity['Latest Version'] === null) delete entity['Latest Version'];\n\
-          \                if(entity['Link'] === null) delete entity['Link'];\n  \
-          \              if(entity['End of Life'] === null) delete entity['End of\
-          \ Life'];\n                if(entity['key'] === null) delete entity['key'];\n\
-          \                // Add source for DQL lookup on those events\n        \
-          \        entity['source'] = 'software-obsolescence-management.os-alert';\n\
-          \                const event = {\n                  title: (threshold ===\
-          \ '0' ? `${entity.OS ? entity.OS : 'OS'} ${entity['Running Version'] ? entity['Running\
-          \ Version'] : entity['Full OS Name']} is now obsolete` : `${entity.OS ?\
-          \ entity.OS : 'OS'} ${entity['Running Version'] ? entity['Running Version']\
-          \ : entity['Full OS Name']} will become obsolete within ${threshold} day${parseInt(threshold)\
-          \ > 0 ? 's' : ''}`) + ` on host ${host}`,\n                  eventType:\
-          \ alertThresholds[threshold],\n                  entitySelector: `type(HOST),entityId(${id})`,\n\
-          \                  properties: entity\n                };\n            \
-          \    filteredEvents.push(event);\n              }       \n            }\n\
-          \          }\n        }\n        console.log(\"Events for soon-to-be-obsolete\
-          \ Operating Systems that match all restrictions and were not already previously\
-          \ raised:\");\n        console.log(filteredEvents);\n        // Ingest events\
-          \ that matches all potential restrictions\n        for(let event of filteredEvents)\
-          \ {\n          try {\n            await eventsClient.createEvent({\n   \
-          \           body: event,\n            });\n            console.log(\"Event\
-          \ ingested successfully\");\n            // console.log(event);\n      \
-          \    } catch (error) {\n            console.error(\"Error ingesting event:\"\
-          );\n            console.error(error);\n          }        \n        }\n\
-          \        console.log('The obsolescence alerting worker completed')\n   \
-          \   } else {\n        throw Error(`DQL query timed out`);\n      }\n   \
-          \ } catch (error) {\n      console.error(\"Error while pulling detected\
-          \ operating systems:\", error);\n      throw error;\n    }    \n  } else\
-          \ {\n    console.log(`All alert thresholds are deactivated. The alerting\
-          \ worker will not run.`)\n  }\n}\n\n\n\n\nasync function getFreshLibraryData(packageManager,\
-          \ library, version) {\n  let data;\n  let releases;\n  // Try to retrieve\
-          \ the list of know releases for that library. If response is not JSON/empty,\
-          \ it will stop the processing of that library version\n  try {\n    releases\
-          \ = await fetch(`https://api.deps.dev/v3/systems/${packageManager}/packages/${encodeURIComponent(library)}`).then((response)\
+          \ DQL are working together ↓ ---------------------------------\n\n\n\nasync\
+          \ function getFreshLibraryData(packageManager, library, version) {\n  let\
+          \ data;\n  let releases;\n  // Try to retrieve the list of know releases\
+          \ for that library. If response is not JSON/empty, it will stop the processing\
+          \ of that library version\n  try {\n    releases = await fetch(`https://api.deps.dev/v3/systems/${packageManager}/packages/${encodeURIComponent(library)}`).then((response)\
           \ => response.json());\n  } catch(e) {\n    console.error(`No releases data\
           \ found for ${library}:${version}`);\n  }\n  if(releases && releases.versions\
           \ && releases.versions.filter(e => e.isDefault === true)[0]) {\n    // console.log(releases);\n\
@@ -531,9 +434,7 @@ workflow:
           \ alertManagementZoneRestrictions = configBody['alertManagementZoneRestrictions'];\n\
           \  const alertTagRestrictions = configBody['alertTagRestrictions'];\n  const\
           \ supportOverrides = configBody['supportOverrides'];\n\n  refreshLibraryData();\n\
-          \  console.log(`Refreshing Library Data...`);\n  raiseProactiveAlerts(alertThresholds,\
-          \ supportOverrides, alertManagementZoneRestrictions, alertTagRestrictions);\n\
-          }"
+          \  console.log(`Refreshing Library Data...`);\n}"
       action: dynatrace.automations:run-javascript
       position:
         x: -1
@@ -559,132 +460,13 @@ workflow:
           \ ↓ Only modify the code section below if you fully understand how the workflow's\
           \ code and dashboard's DQL are working together ↓ ---------------------------------\n\
           \n//--------------------------------- ↓ Raise proactive alerts ↓ ---------------------------------\n\
-          \nasync function raiseProactiveAlerts(alertThresholds, supportOverrides,\
-          \ alertManagementZoneRestrictions, alertTagRestrictions) {\n  if(Object.keys(alertThresholds).find(e\
-          \ => alertThresholds[e] !== false && alertThresholds[e] !== 'false')) {\
-          \ // Launch the worker only if there's at least one threshold activated\
-          \ (cf. constants above)\n    console.log('Launching the obsolescence alerting\
-          \ worker...')\n    const overridesVariableArray = [];\n    for(let override\
-          \ of Object.keys(supportOverrides)) {\n      const overridesVariable = {};\n\
-          \      overridesVariable[override] = supportOverrides[override];\n     \
-          \ overridesVariableArray.push(JSON.stringify(overridesVariable).replace(/\"\
-          /g, \"'\"));\n    }\n    console.log('Support overrides:')\n    console.log(overridesVariableArray.map(e\
-          \ => `\"${e}\"`).join(','));\n    try {\n      const query = {\n       \
-          \ body: {\n          query: 'fetch dt.entity.host, from: -15m | fieldsAdd\
-          \ osVersion, managementZones, hostGroupName, tags, softwareObsolescenceManagement\
-          \ = entity.name | filter isNotNull(osVersion) | fieldsAdd result = lookup([\
-          \ fetch events, from: -7d | filter dt.system.bucket == \"default_davis_custom_events\"\
-          \ | filter event.name == \"software-obsolescence-management.os-info\" |\
-          \ sort timestamp DESC ], sourceField:osVersion, lookupField:key ) | fieldsFlatten\
-          \ result, prefix:\"event.\" | fieldsAdd `Extended Support` = if( ((indexOf(toString(array('\
-          \ +\n            overridesVariableArray.map(e => `\"${e}\"`).join(',') +\n\
-          \            ')), osVersion, from: 0) >= 0) AND (indexOf(toString(array('\
-          \ +\n            overridesVariableArray.map(e => `\"${e}\"`).join(',') +\n\
-          \            ')), \"}\", from: indexOf(toString(array(' +\n            overridesVariableArray.map(e\
-          \ => `\"${e}\"`).join(',') +\n            ')), osVersion, from: 0)) >= 0)),\
-          \ substring( toString(array(' +\n            overridesVariableArray.map(e\
-          \ => `\"${e}\"`).join(',') +\n            ')), from: ( (indexOf(toString(array('\
-          \ +\n            overridesVariableArray.map(e => `\"${e}\"`).join(',') +\n\
-          \            ')), osVersion, from: 0) + stringLength(osVersion) + 5) ),\
-          \ to: indexOf(toString(array(' +\n            overridesVariableArray.map(e\
-          \ => `\"${e}\"`).join(',') +\n            ')), \"}\", from: indexOf(toString(array('\
-          \ +\n            overridesVariableArray.map(e => `\"${e}\"`).join(',') +\n\
-          \            ')), osVersion, from: 0)) - 2 ), else: null ) | fieldsAdd timeBeforeObsolescence\
-          \ = toTimestamp(if(isNotNull(`Extended Support`), `Extended Support`, else:\
-          \ event.eol)) - now() | fields Host = entity.name, `Management Zones` =\
-          \ managementZones, `Tags` = tags, OS = event.os, `Running Version` = event.currentVersion,\
-          \ `Full Name` = osVersion, LTS = event.lts, Cycle = event.currentCycle,\
-          \ `Cycle Published At` = substring(event.currentCyclePublishedAt, to:10),\
-          \ `End of Life` = event.eol, `Extended Support`, `Time Before Obsolescence`\
-          \ = timeBeforeObsolescence, `Latest Version` = event.latestVersion, `Latest\
-          \ Version Published at` = substring(event.latestVersionPublishedAt, to:10),\
-          \ Link = event.link, id, key = event.key | filter `Time Before Obsolescence`\
-          \ > toDuration(-7 * 24 * 60 * 60 * 1000000000) AND `Time Before Obsolescence`\
-          \ < toDuration(90 * 24 * 60 * 60 * 1000000000) | fieldsAdd lastAlert = lookup([\
-          \ fetch events, from: -30d | filter dt.system.bucket == \"default_davis_custom_events\"\
-          \ | filter source == \"software-obsolescence-management.os-alert\" | sort\
-          \ timestamp DESC ], sourceField:id, lookupField:dt.source_entity) | limit\
-          \ 20000'\n          }\n        };\n      // console.log('DQL query:')\n\
-          \      // console.log(query);\n      let res = await queryExecutionClient.queryExecute(query);\n\
-          \      // console.log(res);\n      res = await queryExecutionClient.queryPoll({\n\
-          \        requestToken: res.requestToken,\n        requestTimeoutMilliseconds:\
-          \ 30000\n      });\n      if(res.result && res.result.records) {\n     \
-          \   console.log(\"Soon-to-be-obsolete Operating Systems pulled successfully.\"\
-          );\n        const soonObsoleteEntities = {'0': [], '30': []};\n        for(let\
-          \ entity of res.result.records) {\n          if(entity[\"Time Before Obsolescence\"\
-          ] < 0) {\n            if(alertThresholds['0']) soonObsoleteEntities['0'].push(entity);\n\
-          \          } else if(entity[\"Time Before Obsolescence\"] < 30 * 24 * 60\
-          \ * 60 * 1000000000) {\n            if(alertThresholds['30']) soonObsoleteEntities['30'].push(entity);\n\
-          \          }\n        }\n        console.log(\"Sorted soon-to-be-obsolete\
-          \ Operating Systems:\");\n        console.log(soonObsoleteEntities);\n \
-          \       // From the full list of entities that will soon be obsolete, filter\
-          \ the ones that pass the management zone and tag restrictions and build\
-          \ the corresponding events\n        const filteredEvents = [];\n       \
-          \ for(let threshold of Object.keys(soonObsoleteEntities)) {\n          if(['CUSTOM_INFO',\
-          \ 'CUSTOM_ALERT'].includes(alertThresholds[threshold])) {\n            for(let\
-          \ entity of soonObsoleteEntities[threshold]) {\n              let matchedManagementZones\
-          \ = 0;\n              for(let managementZone of entity['Management Zones'])\
-          \ if(alertManagementZoneRestrictions.includes(managementZone)) matchedManagementZones++;\n\
-          \              let matchedTags = 0;\n              for(let tag of entity['Tags'])\
-          \ if(alertTagRestrictions.includes(tag)) matchedTags++;\n              if(\n\
-          \                (alertManagementZoneRestrictions.length === 0 || matchedManagementZones\
-          \ > 0) &&\n                (alertTagRestrictions.length === 0 || matchedTags\
-          \ > 0) &&\n                ((!entity['lastAlert'] || !entity['lastAlert']['Max\
-          \ Remaining Days Before Obsolescence'] || entity['lastAlert']['key'] !==\
-          \ entity['key']) || parseInt(threshold) < parseInt(entity['lastAlert']['Max\
-          \ Remaining Days Before Obsolescence']))\n              ) {\n          \
-          \      // Clean up output before saving the event\n                delete\
-          \ entity['Management Zones'];\n                delete entity['Tags'];\n\
-          \                const id = entity['id'];\n                delete entity['id'];\n\
-          \                const host = entity['Host'];\n                delete entity['Host'];\n\
-          \                entity['Full OS Name'] = entity['Full Name'];\n       \
-          \         delete entity['Full Name'];\n                delete entity['Time\
-          \ Before Obsolescence'];\n                delete entity['lastAlert'];\n\
-          \                entity['Max Remaining Days Before Obsolescence'] = parseInt(threshold);\n\
-          \                // Remove null values in case of support override\n   \
-          \             if(entity['OS'] === null) delete entity['OS'];\n         \
-          \       if(entity['LTS'] === null) delete entity['LTS'];\n             \
-          \   if(entity['Cycle'] === null) delete entity['Cycle'];\n             \
-          \   if(entity['Latest Version Published at'] === null) delete entity['Latest\
-          \ Version Published at'];\n                if(entity['Cycle Published At']\
-          \ === null) delete entity['Cycle Published At'];\n                if(entity['Running\
-          \ Version'] === null) delete entity['Running Version'];\n              \
-          \  if(entity['Latest Version'] === null) delete entity['Latest Version'];\n\
-          \                if(entity['Link'] === null) delete entity['Link'];\n  \
-          \              if(entity['End of Life'] === null) delete entity['End of\
-          \ Life'];\n                if(entity['key'] === null) delete entity['key'];\n\
-          \                // Add source for DQL lookup on those events\n        \
-          \        entity['source'] = 'software-obsolescence-management.os-alert';\n\
-          \                const event = {\n                  title: (threshold ===\
-          \ '0' ? `${entity.OS ? entity.OS : 'OS'} ${entity['Running Version'] ? entity['Running\
-          \ Version'] : entity['Full OS Name']} is now obsolete` : `${entity.OS ?\
-          \ entity.OS : 'OS'} ${entity['Running Version'] ? entity['Running Version']\
-          \ : entity['Full OS Name']} will become obsolete within ${threshold} day${parseInt(threshold)\
-          \ > 0 ? 's' : ''}`) + ` on host ${host}`,\n                  eventType:\
-          \ alertThresholds[threshold],\n                  entitySelector: `type(HOST),entityId(${id})`,\n\
-          \                  properties: entity\n                };\n            \
-          \    filteredEvents.push(event);\n              }       \n            }\n\
-          \          }\n        }\n        console.log(\"Events for soon-to-be-obsolete\
-          \ Operating Systems that match all restrictions and were not already previously\
-          \ raised:\");\n        console.log(filteredEvents);\n        // Ingest events\
-          \ that matches all potential restrictions\n        for(let event of filteredEvents)\
-          \ {\n          try {\n            await eventsClient.createEvent({\n   \
-          \           body: event,\n            });\n            console.log(\"Event\
-          \ ingested successfully\");\n            // console.log(event);\n      \
-          \    } catch (error) {\n            console.error(\"Error ingesting event:\"\
-          );\n            console.error(error);\n          }        \n        }\n\
-          \        console.log('The obsolescence alerting worker completed')\n   \
-          \   } else {\n        throw Error(`DQL query timed out`);\n      }\n   \
-          \ } catch (error) {\n      console.error(\"Error while pulling detected\
-          \ operating systems:\", error);\n      throw error;\n    }    \n  } else\
-          \ {\n    console.log(`All alert thresholds are deactivated. The alerting\
-          \ worker will not run.`)\n  }\n}\n\n\n\n\nasync function getFreshTechnologyData(technology,\
-          \ edition, version) {\n  let data;\n  let matchedEolTechnologies = [];\n\
-          \  // Match the relevant entries from technologyToProductSlugMap based on\
-          \ the input technology and edition data\n  let technologyToProductSlugMapMatches\
-          \ = Object.keys(technologyToProductSlugMap).filter(e => `${technology}:${edition}`.startsWith(e));\n\
-          \  // Sort matches by longest identifier (technology + edition vs only technology)\
-          \ first, which is considered a basic proxy to relevance\n  technologyToProductSlugMapMatches.sort(function\
+          \n\nasync function getFreshTechnologyData(technology, edition, version)\
+          \ {\n  let data;\n  let matchedEolTechnologies = [];\n  // Match the relevant\
+          \ entries from technologyToProductSlugMap based on the input technology\
+          \ and edition data\n  let technologyToProductSlugMapMatches = Object.keys(technologyToProductSlugMap).filter(e\
+          \ => `${technology}:${edition}`.startsWith(e));\n  // Sort matches by longest\
+          \ identifier (technology + edition vs only technology) first, which is considered\
+          \ a basic proxy to relevance\n  technologyToProductSlugMapMatches.sort(function\
           \ (a, b) {\n    if (a.length < b.length) {\n      return 1;\n    }\n   \
           \ if (a.length > b.length) {\n      return -1;\n    }\n    return 0;\n \
           \ });\n  // console.log(technologyToProductSlugMapMatches);\n  eolTechnologies.forEach(eolTechnology\
@@ -805,9 +587,7 @@ workflow:
           \ alertManagementZoneRestrictions = configBody['alertManagementZoneRestrictions'];\n\
           \  const alertTagRestrictions = configBody['alertTagRestrictions'];\n  const\
           \ supportOverrides = configBody['supportOverrides'];\n  \n  refreshTechnologyData();\n\
-          \  console.log(`Refreshing Technology Data...`);\n  raiseProactiveAlerts(alertThresholds,\
-          \ supportOverrides, alertManagementZoneRestrictions, alertTagRestrictions);\n\
-          }"
+          \  console.log(`Refreshing Technology Data...`);\n}"
       action: dynatrace.automations:run-javascript
       position:
         x: 1
