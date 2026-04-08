@@ -3,7 +3,7 @@ metadata:
   dependencies:
     apps:
     - id: dynatrace.automations
-      version: ^1.2879.0
+      version: ^1.2926.0
   inputs: []
 workflow:
   title: software_maintenance
@@ -219,15 +219,16 @@ workflow:
           \ below if you fully understand how the workflow's code and dashboard's\
           \ DQL are working together ↓ ---------------------------------\n\n\n//---------------------------------\
           \ ↓ Utilities for refreshing OS data ↓ ---------------------------------\n\
-          \nlet eolTechnologies;\n\nconst osToProductSlugMap = {\n  'Red Hat Enterprise\
-          \ Linux Server': 'rhel',\n  'Red Hat Enterprise Linux Server release': 'rhel'\n\
-          };\n\nasync function getFreshOsData(osVersion) {\n  const cleanOsVersion\
-          \ = osVersion.substring(0, osVersion.indexOf('(') > -1 ? osVersion.indexOf('(')\
-          \ : osVersion.length);\n  console.log(cleanOsVersion);\n  // Extract the\
-          \ build number (digits and dots) from any string that could be prefixed\
-          \ by tags or product name; Or after 'ver. ' for Windows.\n  let version;\n\
-          \  let windows = false;\n  if(cleanOsVersion.indexOf('ver. ') > -1) { //\
-          \ Windows\n    windows = true;\n    version = cleanOsVersion.substring(cleanOsVersion.indexOf('ver.\
+          \nlet eolTechnologies;\n\n// set this to a sensible value\nconst refreshInterval\
+          \ = '7d';\n\nconst osToProductSlugMap = {\n  'Red Hat Enterprise Linux Server':\
+          \ 'rhel',\n  'Red Hat Enterprise Linux Server release': 'rhel'\n};\n\nasync\
+          \ function getFreshOsData(osVersion) {\n  const cleanOsVersion = osVersion.substring(0,\
+          \ osVersion.indexOf('(') > -1 ? osVersion.indexOf('(') : osVersion.length);\n\
+          \  console.log(cleanOsVersion);\n  // Extract the build number (digits and\
+          \ dots) from any string that could be prefixed by tags or product name;\
+          \ Or after 'ver. ' for Windows.\n  let version;\n  let windows = false;\n\
+          \  if(cleanOsVersion.indexOf('ver. ') > -1) { // Windows\n    windows =\
+          \ true;\n    version = cleanOsVersion.substring(cleanOsVersion.indexOf('ver.\
           \ ') + 5, cleanOsVersion.length);\n  } else if(cleanOsVersion.match(/\\\
           b\\d+(\\.\\d+)*\\b/g)) {\n    version = cleanOsVersion.match(/\\b\\d+(\\\
           .\\d+)*\\b/g)[0];\n  } else {\n    version = null;\n  }\n  console.log(version);\n\
@@ -288,12 +289,13 @@ workflow:
           \  data.currentCyclePublishedAt = matched.releaseDate;\n          data.latestVersionInCycle\
           \ = matched.latest && matched.latest.name ? matched.latest.name : matched.latest;\n\
           \          data.lts = matched.isLts !== undefined ? matched.isLts : matched.lts;\n\
-          \          data.eol = matched.eolFrom || matched.eol;\n        }       \
-          \ \n      }\n    } catch(e) {\n      console.log(e);\n    }\n  }\n  return\
-          \ data;\n}\n\n\n\nasync function refreshOsData() {\n  //---------------------------------\
-          \ ↓ Refresh OS data ↓ ---------------------------------\n  try {\n    let\
-          \ detectedTechnologies = [];\n    // Download the full list of EOL product\
-          \ slugs\n    eolTechnologies = await fetch('https://endoflife.date/api/all.json').then((response)\
+          \          data.eol = matched.eolFrom || matched.eol;\n          if (matched.eoesFrom\
+          \ != null) {\n            data.eoes = matched.eoesFrom;\n          }\n \
+          \       }        \n      }\n    } catch(e) {\n      console.log(e);\n  \
+          \  }\n  }\n  return data;\n}\n\n\n\nasync function refreshOsData() {\n \
+          \ //--------------------------------- ↓ Refresh OS data ↓ ---------------------------------\n\
+          \  try {\n    let detectedTechnologies = [];\n    // Download the full list\
+          \ of EOL product slugs\n    eolTechnologies = await fetch('https://endoflife.date/api/all.json').then((response)\
           \ => response.json());\n    eolTechnologies = eolTechnologies.map(e => {\n\
           \      return { slug: e };\n    });\n    // Try to augment them with the\
           \ corresponding product name, scraping the homepage's navigation menu (product\
@@ -311,7 +313,7 @@ workflow:
           \  let res = await queryExecutionClient.queryExecute({\n        body: {\n\
           \          query: `fetch dt.entity.host, from: -15m | fieldsAdd osVersion,\
           \ softwareObsolescenceManagement = entity.name | summarize by:{osVersion},\
-          \ count = count() | fieldsAdd result = lookup([ fetch events, from: -7d\
+          \ count = count() | fieldsAdd result = lookup([ fetch events, from: -${refreshInterval}\
           \ | filter dt.system.bucket == \"default_davis_custom_events\" | filter\
           \ event.name == \"software-obsolescence-management.os-info\" | sort timestamp\
           \ DESC ], sourceField:osVersion, lookupField:key ) | fieldsFlatten result,\
@@ -335,11 +337,12 @@ workflow:
           \    await eventsClient.createEvent({\n              body: event,\n    \
           \        });\n            console.log(\"Event ingested successfully\");\n\
           \            // console.log(event);\n          } catch (error) {\n     \
-          \       console.error(\"Error ingesting event\");\n            // console.error(event);\n\
-          \          }\n        } else {\n          console.error(`No technology data\
-          \ found for ${detectedTechnology.osVersion}`);\n        }\n      }\n   \
-          \ }\n  } catch(e) {\n    console.log(e);\n  }\n}\n\n\n\nexport default async\
-          \ function ({ execution_id }) {\n  const configGet = await fetch(`/platform/automation/v1/executions/${execution_id}/tasks/config/result`);\n\
+          \       console.error(error)\n            console.error(\"Error ingesting\
+          \ event\");\n            // console.error(event);\n          }\n       \
+          \ } else {\n          console.error(`No technology data found for ${detectedTechnology.osVersion}`);\n\
+          \        }\n      }\n    }\n  } catch(e) {\n    console.log(e);\n  }\n}\n\
+          \n\n\nexport default async function ({ execution_id }) {\n  const configGet\
+          \ = await fetch(`/platform/automation/v1/executions/${execution_id}/tasks/config/result`);\n\
           \  const configBody = await configGet.json();\n  const alertThresholds =\
           \ configBody['alertThresholds'];\n  const alertManagementZoneRestrictions\
           \ = configBody['alertManagementZoneRestrictions'];\n  const alertTagRestrictions\
